@@ -1,0 +1,3 @@
+sku,name,supplier,quantity,reorder_point,reorder_quantity
+SKU-2001,Sample USB Hub,Northstar Supply,15,5,10
+SKU-2002,Sample Desk Lamp,OfficeHub,3,5,12
