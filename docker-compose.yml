@@ -1,36 +1,53 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: mysql:8.0
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
     environment:
-      POSTGRES_DB: inventory
-      POSTGRES_USER: inventory
-      POSTGRES_PASSWORD: inventory_dev
-    ports: ["127.0.0.1:5432:5432"]
-    volumes: ["postgres_data:/var/lib/postgresql/data"]
+      MYSQL_DATABASE: inventory
+      MYSQL_USER: inventory
+      MYSQL_PASSWORD: inventory_dev
+      MYSQL_ROOT_PASSWORD: inventory_root_dev
+    ports: ["127.0.0.1:3306:3306"]
+    volumes: ["mysql_data:/var/lib/mysql"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U inventory"]
-      interval: 3s
-      timeout: 3s
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
       retries: 20
+
   api:
     build: ./backend
     environment:
-      DATABASE_URL: postgresql+psycopg://inventory:inventory_dev@db:5432/inventory
-      SUPABASE_URL: ${SUPABASE_URL:-}
-      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
-      AUTH_DISABLED: ${AUTH_DISABLED:-true}
+      DATABASE_URL: ${DATABASE_URL:-mysql+pymysql://inventory:inventory_dev@db:3306/inventory?charset=utf8mb4}
+      SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL:-postgresql+psycopg://inventory:inventory_dev@legacy-postgres:5432/inventory}
       CORS_ORIGINS: http://localhost:5173
     ports: ["127.0.0.1:8000:8000"]
     depends_on:
       db: {condition: service_healthy}
     volumes: ["./backend:/app"]
+
   web:
     build: ./frontend
     environment:
       VITE_API_URL: http://localhost:8000
-      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
-      VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
     ports: ["127.0.0.1:5173:5173"]
     depends_on: [api]
+
+  legacy-postgres:
+    image: postgres:16-alpine
+    profiles: ["migration"]
+    environment:
+      POSTGRES_DB: inventory
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: inventory_dev
+    ports: ["127.0.0.1:5433:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory -d inventory"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
+  mysql_data:
   postgres_data:
