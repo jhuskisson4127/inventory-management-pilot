@@ -76,12 +76,18 @@ def session_digest(request: Request) -> str | None:
     return None
 
 
-def require_user(request: Request, db: Session = Depends(get_db)) -> User:
+def session_user(request: Request, db: Session = Depends(get_db)) -> User | None:
     digest = session_digest(request)
     session = db.get(LoginSession, digest) if digest else None
     if session is None or session.expires_at <= int(time()):
-        raise HTTPException(401, "Sign in required")
+        return None
     return session.user
+
+
+def require_user(user: User | None = Depends(session_user)) -> User:
+    if user is None:
+        raise HTTPException(401, "Sign in required")
+    return user
 
 
 @router.post("/login", dependencies=[Depends(require_csrf_header), Depends(throttle_login)])

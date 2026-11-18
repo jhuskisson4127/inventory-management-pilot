@@ -57,15 +57,27 @@ For the remote Dokku deployment, configure `DATABASE_URL` on `david-morris-6299-
 The source URL and destination must both be reachable from the migration environment. The migration utility only copies into empty MySQL tables, verifies the rows, and does not write to PostgreSQL. Keep PostgreSQL available as a rollback source until the MySQL deployment is checked.
 ## Authentication and access
 
-An operator provisions each account using `python -m app.accounts YOUR_USERNAME` in an interactive terminal with access to the app's MySQL database. Usernames are case-insensitive. The password prompt hides input and requires at least 15 characters. All accounts can access and edit the shared inventory. The public landing page shows the sign-in form until the API confirms a session.
+An operator provisions each account using `python -m app.accounts YOUR_USERNAME` in an interactive terminal with access to the app's MySQL database. Usernames are case-insensitive. The password prompt hides input and requires at least 15 characters. All accounts can access and edit the shared inventory. FastAPI redirects unauthenticated visitors from `/inventory` to `/login` and serves the inventory page with `Cache-Control: no-store`.
 
-Passwords are hashed with Argon2id. The secure, HTTP-only session cookie contains a random token. MySQL stores its SHA-256 digest and eight-hour expiration. Signing out revokes the session immediately. API requests that change state require `X-Inventory-Request: 1`; a browser on any separate trusted origin needs explicit CORS permission.
+Passwords are hashed with Argon2id. The secure, HTTP-only session cookie contains a random token. MySQL stores its SHA-256 digest and eight-hour expiration. Signing out revokes the session immediately. This design uses opaque random tokens verified against MySQL, so it needs no signing key. API requests that change state require `X-Inventory-Request: 1`; a browser on any separate trusted origin needs explicit CORS permission.
 
 ### Dokku rollout
 
 1. Coordinate with the ISCS2 administrator to provision the first account using the new code against the existing MySQL database before switching traffic. The provisioning command creates any missing tables and inserts only the requested account. On a Dokku host that grants one-off access, use `ssh -t dokku@iscs2.gcsu.edu run david-morris-6299-project python -m app.accounts YOUR_USERNAME` when the new image is available. An administrator can also run the same module from a trusted environment with the existing MySQL connection. Test the account in the new build before switching traffic where possible.
 2. Keep `SESSION_COOKIE_SECURE=true` and serve the application via HTTPS. Point the deployment at the existing MySQL database through Dokku's protected configuration. Back up the database and confirm the application account can create the two authentication tables.
 3. After deployment, verify that `/health` returns 200 and anonymous inventory requests return 401. Sign in, confirm that existing products and count history are available, and sign out. Confirm that a subsequent inventory request returns 401.
+
+### Phase 7 demo
+
+Provision a fictional account such as `phase7.demo` using the same account command. Choose a unique demo password at the hidden prompt and put that account's credentials only on the course submission form. Review the deployed products, suppliers, count history and notes, and downloadable samples for fictional data before sharing the demo login. Use a separate MySQL database populated with the fictional seed data if the existing database contains real records.
+
+In a fresh private browser window, open the ISCS2 URL, paste `/inventory` directly, and confirm it lands on `/login`. Sign in with the demo account, sign out, then press Back and confirm you see the login. In the ISCS2 MySQL console, this query verifies the format without printing any of the stored hash:
+
+```sql
+SELECT username, password_hash LIKE '$argon2id$%' AS uses_argon2id
+FROM inventory_users
+WHERE username = 'phase7.demo';
+```
 
 ### Rotate the exposed MySQL credential
 

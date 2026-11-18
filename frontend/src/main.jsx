@@ -27,10 +27,28 @@ function App() {
  const [error, setError] = useState('');
 
  useEffect(() => {
+  const hideCachedPage = () => {
+   if (window.location.pathname === '/inventory') document.documentElement.style.visibility = 'hidden';
+  };
+  const reloadCachedPage = (event) => {
+   if (event.persisted) window.location.reload();
+  };
+  window.addEventListener('pagehide', hideCachedPage);
+  window.addEventListener('pageshow', reloadCachedPage);
   apiRequest('/api/auth/session')
    .then(setSession)
-   .catch(error => { if (error.status !== 401) setError(error.message); })
+   .catch(error => {
+    if (error.status === 401 && window.location.pathname === '/inventory') {
+     window.location.replace('/login');
+    } else if (error.status !== 401) {
+     setError(error.message);
+    }
+   })
    .finally(() => setChecking(false));
+  return () => {
+   window.removeEventListener('pagehide', hideCachedPage);
+   window.removeEventListener('pageshow', reloadCachedPage);
+  };
  }, []);
 
  async function signIn(event) {
@@ -40,8 +58,8 @@ function App() {
   setBusy(true);
   setError('');
   try {
-   setSession(await apiRequest('/api/auth/login', { method: 'POST', body }));
-   form.reset();
+   await apiRequest('/api/auth/login', { method: 'POST', body });
+   window.location.replace('/inventory');
   } catch (error) {
    setError(error.message);
   } finally {
@@ -54,7 +72,7 @@ function App() {
   setError('');
   try {
    await apiRequest('/api/auth/logout', { method: 'POST' });
-   setSession(null);
+   window.location.replace('/login');
   } catch (error) {
    setError(error.message);
   } finally {
@@ -64,7 +82,7 @@ function App() {
 
  if (session) {
   return <Inventory username={session.username} signingOut={busy} signOut={signOut}
-    signOutError={error} onExpired={() => setSession(null)} />;
+    signOutError={error} onExpired={() => window.location.replace('/login')} />;
  }
 
  return <main className="login-page">

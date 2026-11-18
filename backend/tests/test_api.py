@@ -15,6 +15,8 @@ with patch.dict(os.environ, {"DATABASE_URL": f"sqlite:///{test_database}"}):
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from app import main
 
 credentials = {"username": "inventory-test", "password": "test-suite-passphrase"}
 write_headers = {"X-Inventory-Request": "1"}
@@ -70,6 +72,35 @@ def test_login_logout_and_session_replay():
         token = browser.cookies.get(cookie_name())
         assert browser.post("/api/auth/logout").status_code == 204
         assert browser.get("/api/products", headers={"Cookie": f"{cookie_name()}={token}"}).status_code == 401
+
+
+def test_protected_page_redirects_and_cannot_be_reopened_after_logout(tmp_path, monkeypatch):
+    (tmp_path / "index.html").write_text("<div id='root'></div>", encoding="utf-8")
+    monkeypatch.setattr(main, "static_dir", tmp_path)
+    with TestClient(app, base_url="https://testserver", headers=write_headers, follow_redirects=False) as browser:
+        for path in ("/", "/inventory", "/sample_inventory.csv"):
+            response = browser.get(path)
+            assert response.status_code == 303
+            assert response.headers["location"] == "/login"
+            assert response.headers["cache-control"] == "no-store"
+        assert browser.get("/index.html").status_code == 404
+        assert browser.get("/login").status_code == 200
+        assert browser.post("/api/auth/login", json=credentials).status_code == 200
+        page = browser.get("/inventory")
+        assert page.status_code == 200
+        assert page.headers["cache-control"] == "no-store"
+        assert browser.post("/api/auth/logout").status_code == 204
+        reopened = browser.get("/inventory", headers={"If-None-Match": page.headers["etag"]})
+        assert reopened.status_code == 303
+        assert reopened.headers["location"] == "/login"
+
+
+def test_account_password_is_stored_as_an_argon2id_hash():
+    with SessionLocal() as db:
+        stored = db.scalar(select(User.password_hash).where(User.username == credentials["username"]))
+        assert stored.startswith("$argon2id$")
+        assert credentials["password"] not in stored
+        assert password_hasher.verify(stored, credentials["password"])
 
 
 def test_cookie_authenticated_writes_require_csrf_header(client):

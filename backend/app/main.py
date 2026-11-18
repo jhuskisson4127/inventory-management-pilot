@@ -4,15 +4,15 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, UploadFile, File
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db import Base, engine, get_db
-from .auth import require_csrf_header, require_user, router as auth_router
-from .models import Product, PhysicalCount
+from .auth import require_csrf_header, require_user, router as auth_router, session_user
+from .models import Product, PhysicalCount, User
 from .schemas import ProductIn, ProductOut, QuantityIn, CountIn, CountOut
 from .settings import settings
 
@@ -141,6 +141,46 @@ def list_counts(db:Session=Depends(get_db)):
 app.include_router(auth_router)
 app.include_router(inventory)
 
-# In the production container, serve the compiled React app and API from one HTTPS origin.
-if Path(settings.static_dir).is_dir():
-    app.mount("/",StaticFiles(directory=settings.static_dir,html=True),name="frontend")
+# Serve individual pages explicitly so the inventory document always checks the session.
+static_dir = Path(settings.static_dir)
+no_store = {"Cache-Control": "no-store"}
+
+
+@app.get("/", include_in_schema=False)
+def landing_page(user: User | None = Depends(session_user)):
+    return RedirectResponse("/inventory" if user else "/login", status_code=303, headers=no_store)
+
+
+def frontend_document():
+    index = static_dir / "index.html"
+    if not index.is_file():
+        raise HTTPException(404, "Frontend build is unavailable", headers=no_store)
+    return FileResponse(index, headers=no_store)
+
+
+@app.get("/login", include_in_schema=False)
+def login_page(user: User | None = Depends(session_user)):
+    if user:
+        return RedirectResponse("/inventory", status_code=303, headers=no_store)
+    return frontend_document()
+
+
+@app.get("/inventory", include_in_schema=False)
+def inventory_page(user: User | None = Depends(session_user)):
+    if user is None:
+        return RedirectResponse("/login", status_code=303, headers=no_store)
+    return frontend_document()
+
+
+@app.get("/sample_inventory.csv", include_in_schema=False)
+def sample_inventory(user: User | None = Depends(session_user)):
+    if user is None:
+        return RedirectResponse("/login", status_code=303, headers=no_store)
+    sample = static_dir / "sample_inventory.csv"
+    if not sample.is_file():
+        raise HTTPException(404, "Sample CSV is unavailable", headers=no_store)
+    return FileResponse(sample, filename=sample.name, headers=no_store)
+
+
+if (static_dir / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
