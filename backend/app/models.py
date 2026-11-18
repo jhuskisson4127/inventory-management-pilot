@@ -1,7 +1,23 @@
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
+
+
+class User(Base):
+    __tablename__ = "inventory_users"
+
+    username: Mapped[str] = mapped_column(String(64), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+
+
+class LoginSession(Base):
+    __tablename__ = "inventory_login_sessions"
+
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    username: Mapped[str] = mapped_column(ForeignKey("inventory_users.username", ondelete="CASCADE"))
+    expires_at: Mapped[int] = mapped_column(BigInteger, index=True)
+    user: Mapped[User] = relationship()
 
 MYSQL_TABLE_OPTIONS = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_0900_as_cs"}
 

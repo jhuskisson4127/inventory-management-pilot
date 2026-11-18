@@ -77,3 +77,13 @@ td{font-size:13px;padding:12px 13px}
 .file-drop input{font-size:12px!important}
 .error,.notice{font-size:13px;padding:12px 14px}
 @media(max-width:1150px){.sidebar{width:280px}.main{margin-left:280px}.content{padding-left:25px;padding-right:25px}.app-header{padding-left:22px;padding-right:22px}.product-title{font-size:18px}}
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+.login-page .modal { width: min(100%, 420px); }
+.login-page h1 { margin: 1rem 0; }
+.sign-out { margin-top: 0.25rem; }

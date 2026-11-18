@@ -4,11 +4,96 @@ import{createRoot}from'react-dom/client';
 import{Boxes,LayoutDashboard,Package,ClipboardList,Upload,Plus,Search,ArrowDownToLine,TriangleAlert,TrendingUp,Warehouse,ChevronDown,X,Check,RefreshCw}from'lucide-react';
 import'./style.css';
 
-const API=import.meta.env.VITE_API_URL??'http://localhost:8000';
+const API = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '');
 
-function App(){
+async function apiRequest(path, options = {}) {
+ const headers = new Headers(options.headers);
+ if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+ if (options.method && options.method !== 'GET') headers.set('X-Inventory-Request', '1');
+ const response = await fetch(API + path, { ...options, headers, credentials: 'include' });
+ if (!response.ok) {
+  const body = await response.json().catch(() => ({}));
+  const error = new Error(typeof body.detail === 'string' ? body.detail : `Request failed (${response.status})`);
+  error.status = response.status;
+  throw error;
+ }
+ return response.status === 204 ? null : response.json();
+}
+
+function App() {
+ const [session, setSession] = useState(null);
+ const [checking, setChecking] = useState(true);
+ const [busy, setBusy] = useState(false);
+ const [error, setError] = useState('');
+
+ useEffect(() => {
+  apiRequest('/api/auth/session')
+   .then(setSession)
+   .catch(error => { if (error.status !== 401) setError(error.message); })
+   .finally(() => setChecking(false));
+ }, []);
+
+ async function signIn(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const body = JSON.stringify(Object.fromEntries(new FormData(form)));
+  setBusy(true);
+  setError('');
+  try {
+   setSession(await apiRequest('/api/auth/login', { method: 'POST', body }));
+   form.reset();
+  } catch (error) {
+   setError(error.message);
+  } finally {
+   setBusy(false);
+  }
+ }
+
+ async function signOut() {
+  setBusy(true);
+  setError('');
+  try {
+   await apiRequest('/api/auth/logout', { method: 'POST' });
+   setSession(null);
+  } catch (error) {
+   setError(error.message);
+  } finally {
+   setBusy(false);
+  }
+ }
+
+ if (session) {
+  return <Inventory username={session.username} signingOut={busy} signOut={signOut}
+    signOutError={error} onExpired={() => setSession(null)} />;
+ }
+
+ return <main className="login-page">
+  <section className="modal" aria-labelledby="login-title">
+   <div className="brand-mark">H&amp;M</div>
+   <h1 id="login-title">Inventory sign in</h1>
+   {checking ? <p role="status">Checking your session…</p> :
+    <form onSubmit={signIn}>
+     <div className="form-grid">
+      <label className="span-two">Username<input name="username" autoComplete="username" maxLength={64} required /></label>
+      <label className="span-two">Password<input name="password" type="password" autoComplete="current-password" maxLength={1024} required /></label>
+     </div>
+     {error && <p role="alert" className="error">{error}</p>}
+     <div className="modal-actions"><button className="button primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button></div>
+    </form>}
+  </section>
+ </main>;
+}
+
+function Inventory({ username, signingOut, signOut, signOutError, onExpired }){
  const [products,setProducts]=useState([]),[alerts,setAlerts]=useState([]),[counts,setCounts]=useState([]),[tab,setTab]=useState('Overview'),[query,setQuery]=useState(''),[modal,setModal]=useState(''),[editing,setEditing]=useState(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[error,setError]=useState('');
- const request=async(path,options={})=>{const headers={...(options.body instanceof FormData?{}:{'Content-Type':'application/json'})};const r=await fetch(API+path,{...options,headers:{...headers,...options.headers}});if(!r.ok){let body={};try{body=await r.json()}catch{}throw Error(body.detail||`Request failed (${r.status})`)}return r.status===204?null:r.json()};
+ const request = async (path, options) => {
+  try {
+   return await apiRequest(path, options);
+  } catch (error) {
+   if (error.status === 401) onExpired();
+   throw error;
+  }
+ };
  const refresh=async()=>{try{const[p,a,c]=await Promise.all([request('/api/products'),request('/api/alerts'),request('/api/counts')]);setProducts(p);setAlerts(a);setCounts(c);setError('')}catch(e){setError(e.message)}};
  useEffect(()=>{refresh()},[]);
  const reorder=useMemo(()=>products.filter(p=>p.quantity<=p.reorder_point),[products]);
@@ -17,10 +102,10 @@ function App(){
  const act=async fn=>{setBusy(true);setError('');try{await fn();await refresh()}catch(e){setError(e.message)}finally{setBusy(false)}};
  const save=async data=>act(async()=>{if(editing)await request(`/api/products/${editing.id}`,{method:'PUT',body:JSON.stringify(data)});else await request('/api/products',{method:'POST',body:JSON.stringify(data)});setNotice(editing?'Product updated':'Product added');setModal('');setEditing(null)});
  const nav=[['Overview',LayoutDashboard],['Products',Package],['Reorder queue',ClipboardList],['Physical counts',Boxes]];
- return <div className="app"><aside className="sidebar"><div className="brand"><div className="brand-mark">H&amp;M</div><div className="brand-copy"><strong>HUSKISSON &amp; MORRIS</strong><small>An IT Advisory and Application Delivery Firm</small></div></div><div className="workspace"><div className="workspace-icon">P</div><div><b>Pilot workspace</b><small>Inventory manager</small></div><ChevronDown size={15}/></div><label className="nav-label">WORKSPACE</label><nav>{nav.map(([label,Icon])=><button key={label} className={tab===label?'active':''} onClick={()=>setTab(label)}><Icon size={17}/><span>{label}</span>{label==='Reorder queue'&&reorder.length>0&&<i>{reorder.length}</i>}</button>)}</nav><div className="side-bottom"><div className="help-card"><div className="help-spark">✳</div><b>Keep stock in check</b><p>Import a CSV or add your products to get started.</p><button onClick={()=>setModal('import')}>Import inventory <ArrowDownToLine size={14}/></button></div><div className="profile"><div className="avatar">JH</div><div className="profile-info"><b>Jim Huskisson</b><small>Pilot access</small></div></div></div></aside>
+ return <div className="app"><aside className="sidebar"><div className="brand"><div className="brand-mark">H&amp;M</div><div className="brand-copy"><strong>HUSKISSON &amp; MORRIS</strong><small>An IT Advisory and Application Delivery Firm</small></div></div><div className="workspace"><div className="workspace-icon">P</div><div><b>Pilot workspace</b><small>Inventory manager</small></div><ChevronDown size={15}/></div><label className="nav-label">WORKSPACE</label><nav>{nav.map(([label,Icon])=><button key={label} className={tab===label?'active':''} onClick={()=>setTab(label)}><Icon size={17}/><span>{label}</span>{label==='Reorder queue'&&reorder.length>0&&<i>{reorder.length}</i>}</button>)}</nav><div className="side-bottom"><div className="help-card"><div className="help-spark">✳</div><b>Keep stock in check</b><p>Import a CSV or add your products to get started.</p><button onClick={()=>setModal('import')}>Import inventory <ArrowDownToLine size={14}/></button></div><div className="profile"><div className="avatar">{username.slice(0, 2).toUpperCase()}</div><div className="profile-info"><b>{username}</b><button className="text-button sign-out" onClick={signOut} disabled={signingOut}>Sign out</button></div></div></div></aside>
  <main className="main"><header className="app-header"><div className="product-identity"><div className="product-title">Small Business Inventory Management System</div><div className="product-subtitle"><span className="pilot-badge">PILOT</span><span className="crumb">Workspace <span>/</span> <b>{tab}</b></span></div></div><div className="header-right"><span className="sync"><i/> All changes saved</span><button className="icon-button" onClick={refresh} title="Refresh"><RefreshCw size={18}/></button><button className="button primary small" onClick={()=>{setEditing(null);setModal('product')}}><Plus size={17}/> Add product</button></div></header>
- <div className="content">{error&&<div className="error"><TriangleAlert size={17}/>{error}<button onClick={()=>setError('')}><X size={14}/></button></div>}{notice&&<div className="notice"><Check size={16}/>{notice}<button onClick={()=>setNotice('')}><X size={14}/></button></div>}
- {tab==='Overview'&&<><div className="page-intro"><div><div className="eyebrow">WEDNESDAY, OCTOBER 29, 2026 <span>•</span> INVENTORY OVERVIEW</div><h1>Good morning, Jim <span className="wave">✳</span></h1><p>Here's what's happening with your inventory today.</p></div><button className="button secondary" onClick={()=>setModal('import')}><Upload size={16}/> Import CSV</button></div><Stats products={products} total={total} reorder={reorder} healthy={healthy}/><div className="section-head"><div><h2>Needs your attention</h2><p>Products at or below their reorder point</p></div><button className="text-button" onClick={()=>setTab('Reorder queue')}>View reorder queue <span>→</span></button></div><ProductTable rows={reorder.slice(0,5)} compact onEdit={p=>{setEditing(p);setModal('product')}} onQuantity={(p,q)=>act(()=>request(`/api/products/${p.id}/quantity`,{method:'PATCH',body:JSON.stringify({quantity:q})}))}/><div className="section-head recent-head"><div><h2>All products</h2><p>Your complete product catalog</p></div><button className="text-button" onClick={()=>setTab('Products')}>View all products <span>→</span></button></div><ProductTable rows={products.slice(0,5)} compact onEdit={p=>{setEditing(p);setModal('product')}} onQuantity={(p,q)=>act(()=>request(`/api/products/${p.id}/quantity`,{method:'PATCH',body:JSON.stringify({quantity:q})}))}/></>}
+ <div className="content">{signOutError && <div className="error" role="alert">{signOutError}</div>}{error&&<div className="error"><TriangleAlert size={17}/>{error}<button onClick={()=>setError('')}><X size={14}/></button></div>}{notice&&<div className="notice"><Check size={16}/>{notice}<button onClick={()=>setNotice('')}><X size={14}/></button></div>}
+ {tab==='Overview'&&<><div className="page-intro"><div><div className="eyebrow">WEDNESDAY, OCTOBER 29, 2026 <span>•</span> INVENTORY OVERVIEW</div><h1>Inventory overview <span className="wave">✳</span></h1><p>Here's what's happening with your inventory today.</p></div><button className="button secondary" onClick={()=>setModal('import')}><Upload size={16}/> Import CSV</button></div><Stats products={products} total={total} reorder={reorder} healthy={healthy}/><div className="section-head"><div><h2>Needs your attention</h2><p>Products at or below their reorder point</p></div><button className="text-button" onClick={()=>setTab('Reorder queue')}>View reorder queue <span>→</span></button></div><ProductTable rows={reorder.slice(0,5)} compact onEdit={p=>{setEditing(p);setModal('product')}} onQuantity={(p,q)=>act(()=>request(`/api/products/${p.id}/quantity`,{method:'PATCH',body:JSON.stringify({quantity:q})}))}/><div className="section-head recent-head"><div><h2>All products</h2><p>Your complete product catalog</p></div><button className="text-button" onClick={()=>setTab('Products')}>View all products <span>→</span></button></div><ProductTable rows={products.slice(0,5)} compact onEdit={p=>{setEditing(p);setModal('product')}} onQuantity={(p,q)=>act(()=>request(`/api/products/${p.id}/quantity`,{method:'PATCH',body:JSON.stringify({quantity:q})}))}/></>}
  {tab==='Products'&&<><div className="page-intro"><div><div className="eyebrow">CATALOG</div><h1>Products</h1><p>Manage your inventory, suppliers, and reorder settings.</p></div><button className="button secondary" onClick={()=>setModal('import')}><Upload size={16}/> Import CSV</button></div><div className="toolbar"><div className="search"><Search size={16}/><input placeholder="Search products, SKU or supplier..." value={query} onChange={e=>setQuery(e.target.value)}/></div><span className="result-count">{visible.length} products</span></div><ProductTable rows={visible} onEdit={p=>{setEditing(p);setModal('product')}} onQuantity={(p,q)=>act(()=>request(`/api/products/${p.id}/quantity`,{method:'PATCH',body:JSON.stringify({quantity:q})}))} onDelete={p=>act(()=>request(`/api/products/${p.id}`,{method:'DELETE'}))}/></>}
  {tab==='Reorder queue'&&<><div className="page-intro"><div><div className="eyebrow">REPLENISHMENT</div><h1>Reorder queue</h1><p>Recommendations are based on each product's reorder point.</p></div></div><div className="queue-banner"><div className="queue-icon"><TriangleAlert size={19}/></div><div><b>{reorder.length} {reorder.length===1?'product needs':'products need'} attention</b><p>Current stock is at or below the configured reorder point.</p></div><div className="queue-number">{reorder.length.toString().padStart(2,'0')}</div></div><ProductTable rows={reorder} onEdit={p=>{setEditing(p);setModal('product')}} onQuantity={(p,q)=>act(()=>request(`/api/products/${p.id}/quantity`,{method:'PATCH',body:JSON.stringify({quantity:q})}))}/></>}
  {tab==='Physical counts'&&<><div className="page-intro"><div><div className="eyebrow">RECONCILIATION</div><h1>Physical counts</h1><p>Record shelf counts and review differences from system stock.</p></div><button className="button primary" onClick={()=>setModal('count')}><Plus size={16}/> Record a count</button></div><div className="count-summary"><div><span>COUNT ENTRIES</span><b>{counts.length}</b></div><div><span>DISCREPANCIES</span><b>{counts.filter(c=>c.discrepancy!==0).length}</b></div><div><span>COUNT EVENTS</span><b>{new Set(counts.map(c=>c.event_id)).size}</b></div></div><div className="table-wrap"><table><thead><tr><th>PRODUCT</th><th>EVENT</th><th>RECORDED</th><th>COUNTED</th><th>VARIANCE</th><th>DATE</th></tr></thead><tbody>{counts.map(c=><tr key={c.id}><td><b>{c.product_name}</b><small>{c.sku}</small></td><td>{c.event_id}</td><td>{c.recorded_quantity}</td><td>{c.counted_quantity}</td><td><span className={`variance ${c.discrepancy?'different':''}`}>{c.discrepancy>0?'+':''}{c.discrepancy}</span></td><td>{new Date(c.counted_at).toLocaleDateString()}</td></tr>)}</tbody></table>{!counts.length&&<Empty title="No counts recorded" text="Start a count event to reconcile shelf stock with your records."/>}</div></>}

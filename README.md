@@ -1,6 +1,6 @@
 # Stockroom Inventory Management
 
-A React/Vite and FastAPI inventory application using **MySQL 8**. Supabase Auth was removed; Supabase remains an optional source for the existing PostgreSQL database during migration, but is not used for authentication or as the final application database.
+A React/Vite and FastAPI inventory application using **MySQL 8** for inventory, accounts, and sessions. Supabase remains an optional PostgreSQL data source for migrations.
 
 ## Requirements coverage
 
@@ -19,13 +19,13 @@ A React/Vite and FastAPI inventory application using **MySQL 8**. Supabase Auth 
 | R-11 Push notifications | SHOULD | Not implemented; external notification integrations remain excluded |
 | R-12 Vendor lead time | COULD | Not implemented |
 
-Automation, POS/vendor integrations, and external notifications remain excluded. The hosted pilot has no authentication: anyone who can reach it can view and edit the inventory.
+Automation, POS/vendor integrations, and external notifications remain excluded.
 
 ## Run locally with MySQL 8
 
 1. Install and start Docker Desktop.
 2. From this folder, run `docker compose up --build -d`.
-3. Open the app at [http://localhost:5173](http://localhost:5173). FastAPI docs are at [http://localhost:8000/docs](http://localhost:8000/docs).
+3. In a terminal, run `docker compose exec api python -m app.accounts YOUR_USERNAME` and enter a password at the hidden prompts. Open [http://localhost:5173](http://localhost:5173) to sign in. FastAPI docs are at [http://localhost:8000/docs](http://localhost:8000/docs).
 4. If this is a new database and you want the 20 sample products, run `docker compose exec api python seed.py`. Do not seed before migrating existing inventory.
 5. Stop containers with `docker compose down`. Avoid `docker compose down -v` until migration is confirmed and you have a backup; it deletes the MySQL and legacy PostgreSQL data volumes.
 
@@ -57,7 +57,19 @@ For the remote Dokku deployment, configure `DATABASE_URL` on `david-morris-6299-
 The source URL and destination must both be reachable from the migration environment. The migration utility only copies into empty MySQL tables, verifies the rows, and does not write to PostgreSQL. Keep PostgreSQL available as a rollback source until the MySQL deployment is checked.
 ## Authentication and access
 
-There is no authentication. Anyone who can reach the app can view, add, edit, delete, import, and count inventory. Keep public hosting private or add an access-control layer before sharing the URL.
+An operator provisions each account using `python -m app.accounts YOUR_USERNAME` in an interactive terminal with access to the app's MySQL database. Usernames are case-insensitive. The password prompt hides input and requires at least 15 characters. All accounts can access and edit the shared inventory. The public landing page shows the sign-in form until the API confirms a session.
+
+Passwords are hashed with Argon2id. The secure, HTTP-only session cookie contains a random token. MySQL stores its SHA-256 digest and eight-hour expiration. Signing out revokes the session immediately. API requests that change state require `X-Inventory-Request: 1`; a browser on any separate trusted origin needs explicit CORS permission.
+
+### Dokku rollout
+
+1. Coordinate with the ISCS2 administrator to provision the first account using the new code against the existing MySQL database before switching traffic. The provisioning command creates any missing tables and inserts only the requested account. On a Dokku host that grants one-off access, use `ssh -t dokku@iscs2.gcsu.edu run david-morris-6299-project python -m app.accounts YOUR_USERNAME` when the new image is available. An administrator can also run the same module from a trusted environment with the existing MySQL connection. Test the account in the new build before switching traffic where possible.
+2. Keep `SESSION_COOKIE_SECURE=true` and serve the application via HTTPS. Point the deployment at the existing MySQL database through Dokku's protected configuration. Back up the database and confirm the application account can create the two authentication tables.
+3. After deployment, verify that `/health` returns 200 and anonymous inventory requests return 401. Sign in, confirm that existing products and count history are available, and sign out. Confirm that a subsequent inventory request returns 401.
+
+### Rotate the exposed MySQL credential
+
+Have the database administrator create a replacement restricted application credential and store it through the approved secret channel. Configure Dokku's `DATABASE_URL` with the replacement using protected access and keep its value out of Git, chat, and deployment logs. Restart the application and verify database access, login, and inventory operations using the replacement. Revoke the exposed credential promptly after verification and check whether any other service used it. Keep the new credential in place if the application code needs to roll back.
 
 ## Import format
 
@@ -65,14 +77,14 @@ CSV columns (case-insensitive headers): `sku,name,supplier,quantity,reorder_poin
 
 ## Tests
 
-With the API dependencies installed and `DATABASE_URL=sqlite:///./test_inventory.db`, run from `backend/`:
+From `backend/`, run the tests against a temporary SQLite database:
 
 ```sh
 pip install -r requirements.txt
 pytest -q
 ```
 
-The tests cover product CRUD, quantity updates, reorder status and alerts, manual entry, CSV import, and physical count variances.
+The tests cover login, logout, invalid credentials, cookie security, request verification for writes, anonymous access, product CRUD, quantity updates, reorder status and alerts, CSV import, and physical count variances.
 
 ## Main API routes
 
