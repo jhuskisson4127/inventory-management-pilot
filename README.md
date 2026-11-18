@@ -67,6 +67,15 @@ Passwords are hashed with Argon2id. The secure, HTTP-only session cookie contain
 2. Keep `SESSION_COOKIE_SECURE=true` and serve the application via HTTPS. Point the deployment at the existing MySQL database through Dokku's protected configuration. Back up the database and confirm the application account can create the two authentication tables.
 3. After deployment, verify that `/health` returns 200 and anonymous inventory requests return 401. Sign in, confirm that existing products and count history are available, and sign out. Confirm that a subsequent inventory request returns 401.
 
+If your ISCS2 SSH key can use `mysql:console` but Dokku denies `run`, use the account command locally from `backend/` with the Python dependencies installed:
+
+```sh
+python -m app.accounts --iscs2 jim.huskisson
+python -m app.accounts --iscs2 phase7.demo
+```
+
+The prompt hashes the password locally and sends only the hash and username to the assigned database over SSH. This creates the account table if needed. The deployed app creates the session table at startup.
+
 ### Phase 7 demo
 
 Provision a fictional account such as `phase7.demo` using the same account command. Choose a unique demo password at the hidden prompt and put that account's credentials only on the course submission form. Review the deployed products, suppliers, count history and notes, and downloadable samples for fictional data before sharing the demo login. Use a separate MySQL database populated with the fictional seed data if the existing database contains real records.

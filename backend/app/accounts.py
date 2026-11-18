@@ -1,9 +1,12 @@
 import argparse
 import getpass
+import subprocess
 import sys
 import warnings
 
+from sqlalchemy.dialects import mysql
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.schema import CreateTable
 
 from .auth import normalize_username, password_hasher
 from .db import Base, SessionLocal, engine
@@ -13,6 +16,8 @@ from .models import User
 def main():
     parser = argparse.ArgumentParser(description="Create an inventory login")
     parser.add_argument("username")
+    parser.add_argument("--iscs2", action="store_true",
+                        help="Provision the account through the pilot's ISCS2 MySQL console")
     args = parser.parse_args()
     try:
         username = normalize_username(args.username)
@@ -31,9 +36,27 @@ def main():
         except getpass.GetPassWarning:
             parser.error("A terminal with hidden input is required.")
 
+    password_hash = password_hasher.hash(password)
+    if args.iscs2:
+        table = User.__table__
+        dialect = mysql.dialect()
+        create = CreateTable(table, if_not_exists=True).compile(dialect=dialect)
+        insert = table.insert().values(username=username, password_hash=password_hash).compile(
+            dialect=dialect, compile_kwargs={"literal_binds": True}
+        )
+        result = subprocess.run(
+            ["ssh", "-T", "-o", "BatchMode=yes", "dokku@iscs2.gcsu.edu",
+             "mysql:console", "david-morris-6299-project"],
+            input=f"{create};\n{insert};\n", text=True, capture_output=True,
+        )
+        if result.returncode != 0:
+            parser.error("ISCS2 could not create the account. Check SSH access or whether the username exists.")
+        print("Account created.")
+        return
+
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
-        db.add(User(username=username, password_hash=password_hasher.hash(password)))
+        db.add(User(username=username, password_hash=password_hash))
         try:
             db.commit()
         except IntegrityError:
