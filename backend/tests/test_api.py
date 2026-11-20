@@ -144,10 +144,15 @@ def test_product_crud_and_quantity(client):
     assert client.delete(f"/api/products/{pid}").status_code==204
 
 def test_reorder_status_recommendations_and_alerts(client):
-    for row in [product("LOW",4,5),product("AT",5,5),product("HIGH",6,5)]: client.post("/api/products",json=row)
-    assert {p["sku"] for p in client.get("/api/reorders").json()} >= {"LOW","AT"}
-    assert {p["sku"] for p in client.get("/api/alerts").json()} >= {"LOW","AT"}
+    for row in [product("ZERO",0,5), product("ZERO-POINT",0,0), product("LOW",4,5),
+                product("AT",5,5), product("HIGH",6,5)]:
+        assert client.post("/api/products", json=row).status_code == 201
+    reorders = {p["sku"]: p["status"] for p in client.get("/api/reorders").json()}
+    assert reorders["ZERO"] == reorders["ZERO-POINT"] == "Out of Stock"
+    assert reorders.keys() >= {"LOW", "AT"}
+    assert {p["sku"] for p in client.get("/api/alerts").json()} >= {"ZERO", "ZERO-POINT", "LOW", "AT"}
     states={p["sku"]:p["status"] for p in client.get("/api/products").json()}
+    assert states["ZERO"] == states["ZERO-POINT"] == "Out of Stock"
     assert states["LOW"]==states["AT"]=="Reorder" and states["HIGH"]=="In stock"
 
 def test_manual_entry_csv_import_and_physical_count(client):

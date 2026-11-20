@@ -48,7 +48,12 @@ def startup():
 
 def output(p):
     values={k:getattr(p,k) for k in ("id","sku","name","supplier","quantity","reorder_point","reorder_quantity","created_at")}
-    values["status"]="Reorder" if p.quantity<=p.reorder_point else "In stock"
+    if p.quantity == 0:
+        values["status"] = "Out of Stock"
+    elif p.quantity <= p.reorder_point:
+        values["status"] = "Reorder"
+    else:
+        values["status"] = "In stock"
     return ProductOut(**values)
 
 @app.get("/health")
